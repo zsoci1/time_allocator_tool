@@ -28,6 +28,12 @@ from PyQt6.QtWidgets import (
 
 from planner_data import PlannerDB
 
+PRIORITY_COLORS = {
+    "High": "#e8b4b8",
+    "Normal": "#d8dee9",
+    "Low": "#c7dfc5",
+}
+
 
 class PlannerWindow(QMainWindow):
     def __init__(self):
@@ -158,9 +164,7 @@ class PlannerWindow(QMainWindow):
         category_group = QGroupBox("Create or edit category")
         category_form = QFormLayout(category_group)
         self.category_name = QLineEdit()
-        self.category_color = QLineEdit("#4f46e5")
         category_form.addRow("Name", self.category_name)
-        category_form.addRow("Color", self.category_color)
         category_buttons = QHBoxLayout()
         self.save_category_button = QPushButton("Add category")
         self.save_category_button.clicked.connect(self.save_category)
@@ -175,15 +179,15 @@ class PlannerWindow(QMainWindow):
         category_form.addRow(category_buttons)
         layout.addWidget(category_group)
 
-        self.categories_table = QTableWidget(0, 3)
-        self.categories_table.setHorizontalHeaderLabels(["Name", "Color", "Tasks"])
+        self.categories_table = QTableWidget(0, 2)
+        self.categories_table.setHorizontalHeaderLabels(["Name", "Tasks"])
         self.categories_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
         )
         self.categories_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.categories_table.setMinimumHeight(160)
         self.set_table_column_stretch(
-            self.categories_table, stretch_columns=[0], fixed_columns=[2]
+            self.categories_table, stretch_columns=[0], fixed_columns=[1]
         )
         self.categories_table.itemSelectionChanged.connect(self.on_category_select)
         layout.addWidget(self.categories_table)
@@ -233,14 +237,10 @@ class PlannerWindow(QMainWindow):
             self.categories_table.insertRow(row)
             values = (
                 category["name"],
-                category["color"],
                 str(sum(t["category_id"] == category["id"] for t in tasks)),
             )
             for column, value in enumerate(values):
                 self.categories_table.setItem(row, column, QTableWidgetItem(value))
-            self.apply_category_color(
-                self.categories_table.item(row, 0), category["color"]
-            )
             self.categories_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, category["id"]
             )
@@ -263,8 +263,8 @@ class PlannerWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 self.tasks_table.setItem(row, column, QTableWidgetItem(value))
-            self.apply_category_color(
-                self.tasks_table.item(row, 1), task["category_color"]
+            self.apply_priority_color(
+                self.tasks_table.item(row, 2), task["priority"]
             )
             self.tasks_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, task["id"]
@@ -295,8 +295,8 @@ class PlannerWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 self.plan_table.setItem(row, column, QTableWidgetItem(value))
-            self.apply_category_color(
-                self.plan_table.item(row, 1), item["category_color"]
+            self.apply_priority_color(
+                self.plan_table.item(row, 2), item["priority"]
             )
             self.plan_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, item["id"]
@@ -304,16 +304,14 @@ class PlannerWindow(QMainWindow):
         self.update_availability()
 
     @staticmethod
-    def apply_category_color(item, color):
-        background = QColor(color)
-        if not background.isValid():
-            return
-        item.setBackground(background)
+    def apply_priority_color(item, priority):
+        background = QColor(PRIORITY_COLORS.get(priority, "#d8dee9"))
         luminance = (
             (0.299 * background.red())
             + (0.587 * background.green())
             + (0.114 * background.blue())
         )
+        item.setBackground(background)
         item.setForeground(QColor("#000000" if luminance > 150 else "#ffffff"))
 
     def refresh_stats(self):
@@ -451,13 +449,12 @@ class PlannerWindow(QMainWindow):
             return
         try:
             if self.selected_category_id is None:
-                self.db.add_category(name, self.category_color.text().strip() or "#4f46e5")
+                self.db.add_category(name, "")
             else:
-                self.db.update_category(
-                    self.selected_category_id,
-                    name,
-                    self.category_color.text().strip() or "#4f46e5",
-                )
+                category = self.db.get_category_by_name(name)
+                if category and category["id"] != self.selected_category_id:
+                    raise sqlite3.IntegrityError
+                self.db.update_category(self.selected_category_id, name, "")
         except sqlite3.IntegrityError:
             QMessageBox.warning(self, "Duplicate category", "That category already exists.")
             return
@@ -471,14 +468,12 @@ class PlannerWindow(QMainWindow):
         category = next(c for c in self.db.get_categories() if c["id"] == category_id)
         self.selected_category_id = category_id
         self.category_name.setText(category["name"])
-        self.category_color.setText(category["color"])
         self.save_category_button.setText("Save changes")
         self.delete_category_button.setEnabled(True)
 
     def clear_category_form(self):
         self.selected_category_id = None
         self.category_name.clear()
-        self.category_color.setText("#4f46e5")
         self.save_category_button.setText("Add category")
         self.delete_category_button.setEnabled(False)
 
