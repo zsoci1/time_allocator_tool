@@ -6,3 +6,6 @@ venv/
 .env
 .DS_Store
 data/
+build/
+dist/
+*.spec

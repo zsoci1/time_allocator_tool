@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +28,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-DB_PATH = Path(__file__).resolve().parent / "data" / "planner.db"
+APP_DIR = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent
+)
+DB_PATH = APP_DIR / "data" / "planner.db"
 
 
 class PlannerDB:

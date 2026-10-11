@@ -20,6 +20,16 @@ python time_allocator_app.py
 
 The app stores data in the `data/` folder as `planner.db`.
 
+## Build a Windows executable
+
+Run this from PowerShell:
+
+```powershell
+.\build_executable.ps1
+```
+
+The standalone executable is created at `dist\TimeAllocator.exe`. Its SQLite data is stored in a `data` folder next to the executable.
+
 ## Notes
 
 This version is intentionally focused on a fast, manual planning experience. It uses PyQt6 for the desktop GUI, keeps the first release simple, and avoids automatic scheduling or complex analytics.
