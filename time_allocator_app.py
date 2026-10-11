@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QHeaderView,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -95,6 +96,9 @@ class PlannerWindow(QMainWindow):
             QTableWidget.SelectionBehavior.SelectRows
         )
         self.plan_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.set_table_column_stretch(
+            self.plan_table, stretch_columns=[0], fixed_columns=[2, 3, 4]
+        )
         layout.addWidget(self.plan_table)
 
         remove = QPushButton("Remove selected block")
@@ -145,6 +149,9 @@ class PlannerWindow(QMainWindow):
         )
         self.tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tasks_table.setMinimumHeight(260)
+        self.set_table_column_stretch(
+            self.tasks_table, stretch_columns=[0], fixed_columns=[2, 3, 4]
+        )
         self.tasks_table.itemSelectionChanged.connect(self.on_task_select)
         layout.addWidget(self.tasks_table)
 
@@ -175,6 +182,9 @@ class PlannerWindow(QMainWindow):
         )
         self.categories_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.categories_table.setMinimumHeight(160)
+        self.set_table_column_stretch(
+            self.categories_table, stretch_columns=[0], fixed_columns=[2]
+        )
         self.categories_table.itemSelectionChanged.connect(self.on_category_select)
         layout.addWidget(self.categories_table)
 
@@ -185,6 +195,15 @@ class PlannerWindow(QMainWindow):
         recurring_layout.addWidget(self.recurring_text)
         layout.addWidget(recurring_group)
         self.tabs.addTab(tab, "Tasks")
+
+    @staticmethod
+    def set_table_column_stretch(table, stretch_columns, fixed_columns):
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for column in stretch_columns:
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        for column in fixed_columns:
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
 
     def build_stats_tab(self):
         tab = QWidget()
