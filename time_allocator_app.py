@@ -225,6 +225,17 @@ class PlannerDB:
         ).fetchone()
         return int(row["total"]) if row else 0
 
+    def get_completed_total_minutes_for_day(self, day: str):
+        row = self.conn.execute(
+            """
+            SELECT COALESCE(SUM(minutes), 0) AS total
+            FROM allocations
+            WHERE date = ? AND completed = 1
+            """,
+            (day,),
+        ).fetchone()
+        return int(row["total"]) if row else 0
+
     def remove_allocation(self, allocation_id: int):
         self.conn.execute("DELETE FROM allocations WHERE id = ?", (allocation_id,))
         self.conn.commit()
@@ -283,6 +294,21 @@ class PlannerDB:
             FROM categories c
             LEFT JOIN tasks t ON t.category_id = c.id
             LEFT JOIN allocations a ON a.task_id = t.id AND a.date = ?
+            GROUP BY c.name
+            ORDER BY total_minutes DESC, c.name ASC
+            """,
+            (day,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_completed_category_totals(self, day: str):
+        rows = self.conn.execute(
+            """
+            SELECT c.name AS category_name, COALESCE(SUM(a.minutes), 0) AS total_minutes
+            FROM categories c
+            LEFT JOIN tasks t ON t.category_id = c.id
+            LEFT JOIN allocations a
+                ON a.task_id = t.id AND a.date = ? AND a.completed = 1
             GROUP BY c.name
             ORDER BY total_minutes DESC, c.name ASC
             """,
@@ -559,7 +585,7 @@ class PlannerApp:
 
     def refresh_summary(self):
         day = self.date_var.get().strip() or date.today().isoformat()
-        total = self.db.get_total_minutes_for_day(day)
+        total = self.db.get_completed_total_minutes_for_day(day)
         free_time = self.free_time_var.get().strip()
         try:
             free_time_value = int(free_time)
@@ -568,17 +594,17 @@ class PlannerApp:
 
         self.update_availability(total=total, free_time=free_time_value)
 
-        category_totals = self.db.get_category_totals(day)
+        category_totals = self.db.get_completed_category_totals(day)
         summary = []
         summary.append(f"Date: {day}\n")
-        summary.append(f"Allocated: {total} minutes")
+        summary.append(f"Completed: {total} minutes")
         summary.append(f"Free time target: {free_time_value} minutes")
-        summary.append(f"Remaining: {max(free_time_value - total, 0)} minutes\n")
+        summary.append(f"Uncompleted: {max(free_time_value - total, 0)} minutes\n")
         summary.append("Category totals:")
         for row in category_totals:
             summary.append(f"- {row['category_name']}: {row['total_minutes']} minutes")
         if not category_totals:
-            summary.append("- No allocations yet")
+            summary.append("- No completed tasks yet")
 
         self.summary_text.configure(state="normal")
         self.summary_text.delete("1.0", tk.END)
