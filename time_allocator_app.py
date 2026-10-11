@@ -330,9 +330,15 @@ class PlannerApp:
         self.free_time_var = tk.StringVar(value="120")
         self.free_time_entry = ttk.Entry(top, textvariable=self.free_time_var, width=10)
         self.free_time_entry.grid(row=0, column=3, padx=(5, 10))
+        self.free_time_var.trace_add("write", self.on_planning_input_changed)
 
         refresh_btn = ttk.Button(top, text="Refresh", command=self.refresh_all)
         refresh_btn.grid(row=0, column=4, padx=(0, 10))
+
+        self.remaining_var = tk.StringVar()
+        ttk.Label(
+            top, textvariable=self.remaining_var, font=("TkDefaultFont", 10, "bold")
+        ).grid(row=0, column=5, padx=(8, 0), sticky="w")
 
         action = ttk.Frame(self.planner_tab, padding=(12, 0, 12, 12))
         action.pack(fill="x")
@@ -346,8 +352,11 @@ class PlannerApp:
         self.minutes_entry.insert(0, "30")
         self.minutes_entry.grid(row=0, column=3, padx=(5, 10))
 
-        add_btn = ttk.Button(action, text="Add to plan", command=self.add_selected_task)
-        add_btn.grid(row=0, column=4, padx=(0, 10))
+        self.add_plan_btn = ttk.Button(
+            action, text="Add to plan", command=self.add_selected_task
+        )
+        self.add_plan_btn.grid(row=0, column=4, padx=(0, 10))
+        self.date_var.trace_add("write", self.on_planning_input_changed)
 
         done_btn = ttk.Button(action, text="Mark done", command=self.mark_selected_done)
         done_btn.grid(row=0, column=5)
@@ -475,6 +484,9 @@ class PlannerApp:
         self.refresh_plan()
         self.refresh_summary()
 
+    def on_planning_input_changed(self, *_args):
+        self.update_availability()
+
     def refresh_categories(self):
         categories = self.db.get_categories()
         names = [item["name"] for item in categories]
@@ -554,6 +566,8 @@ class PlannerApp:
         except ValueError:
             free_time_value = 0
 
+        self.update_availability(total=total, free_time=free_time_value)
+
         category_totals = self.db.get_category_totals(day)
         summary = []
         summary.append(f"Date: {day}\n")
@@ -570,6 +584,31 @@ class PlannerApp:
         self.summary_text.delete("1.0", tk.END)
         self.summary_text.insert(tk.END, "\n".join(summary))
         self.summary_text.configure(state="disabled")
+
+    def update_availability(self, total=None, free_time=None):
+        day = self.date_var.get().strip() or date.today().isoformat()
+        if total is None:
+            total = self.db.get_total_minutes_for_day(day)
+        if free_time is None:
+            try:
+                free_time = int(self.free_time_var.get().strip())
+            except ValueError:
+                free_time = 0
+
+        if free_time < 0:
+            self.remaining_var.set("Enter a non-negative free-time target")
+            self.add_plan_btn.configure(state="disabled")
+            return
+
+        remaining = free_time - total
+        if remaining < 0:
+            self.remaining_var.set(f"Over capacity by {abs(remaining)} min")
+            self.add_plan_btn.configure(state="disabled")
+        else:
+            self.remaining_var.set(f"Remaining: {remaining} min")
+            self.add_plan_btn.configure(
+                state="normal" if remaining > 0 else "disabled"
+            )
 
     def save_task(self):
         title = self.task_title.get().strip()
@@ -724,7 +763,33 @@ class PlannerApp:
         except ValueError:
             messagebox.showwarning("Invalid minutes", "Please enter a whole number of minutes.")
             return
+        if minutes <= 0:
+            messagebox.showwarning(
+                "Invalid minutes", "Allocated minutes must be greater than zero."
+            )
+            return
         day = self.date_var.get().strip() or date.today().isoformat()
+        try:
+            free_time = int(self.free_time_var.get().strip())
+        except ValueError:
+            messagebox.showwarning(
+                "Invalid free time", "Free time must be a non-negative whole number."
+            )
+            return
+        if free_time < 0:
+            messagebox.showwarning(
+                "Invalid free time", "Free time must be a non-negative whole number."
+            )
+            return
+        allocated = self.db.get_total_minutes_for_day(day)
+        remaining = free_time - allocated
+        if minutes > remaining:
+            messagebox.showwarning(
+                "Free time limit reached",
+                f"This block needs {minutes} minutes, but only {max(remaining, 0)} minutes remain.",
+            )
+            self.update_availability(total=allocated, free_time=free_time)
+            return
         self.db.add_allocation(task_id, day, minutes)
         self.minutes_entry.delete(0, tk.END)
         self.minutes_entry.insert(0, "30")
