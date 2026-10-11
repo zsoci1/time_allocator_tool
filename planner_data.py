@@ -83,6 +83,14 @@ class PlannerDB:
             """
         )
         self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_allocations_date ON allocations(date)"
         )
         self.conn.execute(
@@ -95,7 +103,31 @@ class PlannerDB:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_title_unique ON tasks(title)"
         )
         self.conn.commit()
-        self.seed_data()
+        self.seed_data_if_new_database()
+
+    def seed_data_if_new_database(self):
+        initialized = self.conn.execute(
+            "SELECT 1 FROM app_metadata WHERE key = 'seed_data_initialized'"
+        ).fetchone()
+        if initialized:
+            return
+
+        category_count = self.conn.execute(
+            "SELECT COUNT(*) AS count FROM categories"
+        ).fetchone()["count"]
+        task_count = self.conn.execute(
+            "SELECT COUNT(*) AS count FROM tasks"
+        ).fetchone()["count"]
+        if category_count == 0 and task_count == 0:
+            self.seed_data()
+
+        self.conn.execute(
+            """
+            INSERT INTO app_metadata (key, value)
+            VALUES ('seed_data_initialized', 'true')
+            """
+        )
+        self.conn.commit()
 
     def seed_data(self):
         category_names = [
