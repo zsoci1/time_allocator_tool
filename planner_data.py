@@ -214,7 +214,15 @@ class PlannerDB:
             SELECT t.*, c.name AS category_name, c.color AS category_color
             FROM tasks t
             JOIN categories c ON c.id = t.category_id
-            ORDER BY c.name ASC, t.title ASC
+            ORDER BY
+                CASE t.priority
+                    WHEN 'High' THEN 0
+                    WHEN 'Normal' THEN 1
+                    WHEN 'Low' THEN 2
+                    ELSE 3
+                END,
+                c.name ASC,
+                t.title ASC
             """
         ).fetchall()
         return [dict(row) for row in rows]

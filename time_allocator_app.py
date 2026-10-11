@@ -3,6 +3,7 @@ import sys
 from datetime import date
 
 from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -143,6 +144,7 @@ class PlannerWindow(QMainWindow):
             QTableWidget.SelectionBehavior.SelectRows
         )
         self.tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tasks_table.setMinimumHeight(260)
         self.tasks_table.itemSelectionChanged.connect(self.on_task_select)
         layout.addWidget(self.tasks_table)
 
@@ -172,6 +174,7 @@ class PlannerWindow(QMainWindow):
             QTableWidget.SelectionBehavior.SelectRows
         )
         self.categories_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.categories_table.setMinimumHeight(160)
         self.categories_table.itemSelectionChanged.connect(self.on_category_select)
         layout.addWidget(self.categories_table)
 
@@ -216,6 +219,9 @@ class PlannerWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 self.categories_table.setItem(row, column, QTableWidgetItem(value))
+            self.apply_category_color(
+                self.categories_table.item(row, 0), category["color"]
+            )
             self.categories_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, category["id"]
             )
@@ -238,6 +244,9 @@ class PlannerWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 self.tasks_table.setItem(row, column, QTableWidgetItem(value))
+            self.apply_category_color(
+                self.tasks_table.item(row, 1), task["category_color"]
+            )
             self.tasks_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, task["id"]
             )
@@ -267,10 +276,26 @@ class PlannerWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 self.plan_table.setItem(row, column, QTableWidgetItem(value))
+            self.apply_category_color(
+                self.plan_table.item(row, 1), item["category_color"]
+            )
             self.plan_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, item["id"]
             )
         self.update_availability()
+
+    @staticmethod
+    def apply_category_color(item, color):
+        background = QColor(color)
+        if not background.isValid():
+            return
+        item.setBackground(background)
+        luminance = (
+            (0.299 * background.red())
+            + (0.587 * background.green())
+            + (0.114 * background.blue())
+        )
+        item.setForeground(QColor("#000000" if luminance > 150 else "#ffffff"))
 
     def refresh_stats(self):
         day = self.current_day()
