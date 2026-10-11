@@ -114,6 +114,23 @@ class PlannerDB:
         )
         self.conn.commit()
 
+    def update_category(self, category_id: int, name: str, color: str):
+        self.conn.execute(
+            "UPDATE categories SET name = ?, color = ? WHERE id = ?",
+            (name, color, category_id),
+        )
+        self.conn.commit()
+
+    def delete_category(self, category_id: int):
+        task_count = self.conn.execute(
+            "SELECT COUNT(*) AS count FROM tasks WHERE category_id = ?",
+            (category_id,),
+        ).fetchone()["count"]
+        if task_count:
+            raise ValueError("Move or delete the category's tasks before deleting it.")
+        self.conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+        self.conn.commit()
+
     def add_task(self, title: str, category_name: str, priority: str, default_minutes: int, recurrence: str):
         category = self.get_category_by_name(category_name)
         if category is None:
@@ -126,6 +143,34 @@ class PlannerDB:
             """,
             (title, category["id"], priority, default_minutes, recurrence),
         )
+        self.conn.commit()
+
+    def update_task(
+        self,
+        task_id: int,
+        title: str,
+        category_name: str,
+        priority: str,
+        default_minutes: int,
+        recurrence: str,
+    ):
+        category = self.get_category_by_name(category_name)
+        if category is None:
+            raise ValueError("Select an existing category.")
+        self.conn.execute(
+            """
+            UPDATE tasks
+            SET title = ?, category_id = ?, priority = ?,
+                default_minutes = ?, recurrence = ?
+            WHERE id = ?
+            """,
+            (title, category["id"], priority, default_minutes, recurrence, task_id),
+        )
+        self.conn.commit()
+
+    def delete_task(self, task_id: int):
+        self.conn.execute("DELETE FROM allocations WHERE task_id = ?", (task_id,))
+        self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         self.conn.commit()
 
     def get_categories(self):
@@ -253,6 +298,8 @@ class PlannerApp:
         self.root.geometry("1100x680")
         self.db = PlannerDB()
         self.task_lookup = {}
+        self.selected_task_id = None
+        self.selected_category_id = None
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -349,8 +396,18 @@ class PlannerApp:
         self.recurrence_box.set("one_time")
         self.recurrence_box.grid(row=2, column=1, padx=(5, 12), sticky="ew", pady=(8, 0))
 
-        create_btn = ttk.Button(form, text="Add task", command=self.add_task)
-        create_btn.grid(row=2, column=3, sticky="w", pady=(8, 0))
+        task_buttons = ttk.Frame(form)
+        task_buttons.grid(row=2, column=3, sticky="w", pady=(8, 0))
+        self.save_task_btn = ttk.Button(task_buttons, text="Add task", command=self.save_task)
+        self.save_task_btn.pack(side="left")
+        self.delete_task_btn = ttk.Button(
+            task_buttons, text="Delete selected", command=self.delete_selected_task,
+            state="disabled",
+        )
+        self.delete_task_btn.pack(side="left", padx=(8, 0))
+        ttk.Button(task_buttons, text="Clear", command=self.clear_task_form).pack(
+            side="left", padx=(8, 0)
+        )
 
         list_frame = ttk.LabelFrame(self.tasks_tab, text="Current tasks", padding=12)
         list_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
@@ -360,6 +417,45 @@ class PlannerApp:
             self.tasks_tree.heading(column, text=column.replace("_", " ").title())
             self.tasks_tree.column(column, width=160, anchor="center")
         self.tasks_tree.pack(fill="both", expand=True)
+        self.tasks_tree.bind("<<TreeviewSelect>>", self.on_task_select)
+
+        category_form = ttk.LabelFrame(self.tasks_tab, text="Create or edit category", padding=12)
+        category_form.pack(fill="x", padx=12, pady=(0, 12))
+
+        ttk.Label(category_form, text="Name").grid(row=0, column=0, sticky="w")
+        self.category_name = ttk.Entry(category_form, width=24)
+        self.category_name.grid(row=0, column=1, padx=(5, 12))
+
+        ttk.Label(category_form, text="Color").grid(row=0, column=2, sticky="w")
+        self.category_color = ttk.Entry(category_form, width=12)
+        self.category_color.insert(0, "#4f46e5")
+        self.category_color.grid(row=0, column=3, padx=(5, 12))
+
+        category_buttons = ttk.Frame(category_form)
+        category_buttons.grid(row=0, column=4, sticky="w")
+        self.save_category_btn = ttk.Button(
+            category_buttons, text="Add category", command=self.save_category
+        )
+        self.save_category_btn.pack(side="left")
+        self.delete_category_btn = ttk.Button(
+            category_buttons, text="Delete selected", command=self.delete_selected_category,
+            state="disabled",
+        )
+        self.delete_category_btn.pack(side="left", padx=(8, 0))
+        ttk.Button(category_buttons, text="Clear", command=self.clear_category_form).pack(
+            side="left", padx=(8, 0)
+        )
+
+        category_list = ttk.LabelFrame(self.tasks_tab, text="Categories", padding=12)
+        category_list.pack(fill="x", padx=12, pady=(0, 12))
+        self.categories_tree = ttk.Treeview(
+            category_list, columns=("name", "color", "task_count"), show="headings", height=5
+        )
+        for column in ("name", "color", "task_count"):
+            self.categories_tree.heading(column, text=column.replace("_", " ").title())
+            self.categories_tree.column(column, width=180, anchor="center")
+        self.categories_tree.pack(fill="x")
+        self.categories_tree.bind("<<TreeviewSelect>>", self.on_category_select)
 
         recurring_frame = ttk.LabelFrame(self.tasks_tab, text="Recurring backlog", padding=12)
         recurring_frame.pack(fill="x", padx=12)
@@ -405,6 +501,17 @@ class PlannerApp:
                     task["default_minutes"],
                     task["recurrence"],
                 ),
+                iid=str(task["id"]),
+            )
+
+        self.categories_tree.delete(*self.categories_tree.get_children())
+        for category in self.db.get_categories():
+            task_count = sum(task["category_id"] == category["id"] for task in tasks)
+            self.categories_tree.insert(
+                "",
+                "end",
+                values=(category["name"], category["color"], task_count),
+                iid=str(category["id"]),
             )
 
         missed = self.db.get_missed_recurring_tasks()
@@ -464,7 +571,7 @@ class PlannerApp:
         self.summary_text.insert(tk.END, "\n".join(summary))
         self.summary_text.configure(state="disabled")
 
-    def add_task(self):
+    def save_task(self):
         title = self.task_title.get().strip()
         if not title:
             messagebox.showwarning("Missing task title", "Please provide a title.")
@@ -476,13 +583,132 @@ class PlannerApp:
         except ValueError:
             messagebox.showwarning("Invalid minutes", "The default minutes value must be a number.")
             return
+        if default_minutes <= 0:
+            messagebox.showwarning("Invalid minutes", "Default minutes must be greater than zero.")
+            return
         recurrence = self.recurrence_box.get().strip()
 
-        self.db.add_task(title, category_name, priority, default_minutes, recurrence)
+        try:
+            if self.selected_task_id is None:
+                self.db.add_task(title, category_name, priority, default_minutes, recurrence)
+            else:
+                self.db.update_task(
+                    self.selected_task_id,
+                    title,
+                    category_name,
+                    priority,
+                    default_minutes,
+                    recurrence,
+                )
+        except sqlite3.IntegrityError:
+            messagebox.showwarning("Duplicate task", "A task with that title already exists.")
+            return
+        except ValueError as error:
+            messagebox.showwarning("Unable to save task", str(error))
+            return
+        self.clear_task_form()
+        self.refresh_all()
+
+    def on_task_select(self, _event):
+        selection = self.tasks_tree.selection()
+        if not selection:
+            return
+        task_id = int(selection[0])
+        task = next((item for item in self.db.get_tasks() if item["id"] == task_id), None)
+        if task is None:
+            return
+        self.selected_task_id = task_id
         self.task_title.delete(0, tk.END)
+        self.task_title.insert(0, task["title"])
+        self.category_box.set(task["category_name"])
+        self.priority_box.set(task["priority"])
+        self.default_minutes.delete(0, tk.END)
+        self.default_minutes.insert(0, str(task["default_minutes"]))
+        self.recurrence_box.set(task["recurrence"])
+        self.save_task_btn.configure(text="Save changes")
+        self.delete_task_btn.configure(state="normal")
+
+    def delete_selected_task(self):
+        if self.selected_task_id is None:
+            return
+        if not messagebox.askyesno(
+            "Delete task", "Delete this task and its planned allocations?"
+        ):
+            return
+        self.db.delete_task(self.selected_task_id)
+        self.clear_task_form()
+        self.refresh_all()
+
+    def clear_task_form(self):
+        self.selected_task_id = None
+        self.task_title.delete(0, tk.END)
+        values = self.category_box["values"]
+        self.category_box.set(values[0] if values else "")
+        self.priority_box.set("Normal")
         self.default_minutes.delete(0, tk.END)
         self.default_minutes.insert(0, "45")
+        self.recurrence_box.set("one_time")
+        self.save_task_btn.configure(text="Add task")
+        self.delete_task_btn.configure(state="disabled")
+
+    def save_category(self):
+        name = self.category_name.get().strip()
+        color = self.category_color.get().strip() or "#4f46e5"
+        if not name:
+            messagebox.showwarning("Missing category name", "Please provide a category name.")
+            return
+        try:
+            if self.selected_category_id is None:
+                self.db.add_category(name, color)
+            else:
+                self.db.update_category(self.selected_category_id, name, color)
+        except sqlite3.IntegrityError:
+            messagebox.showwarning(
+                "Duplicate category", "A category with that name already exists."
+            )
+            return
+        self.clear_category_form()
         self.refresh_all()
+
+    def on_category_select(self, _event):
+        selection = self.categories_tree.selection()
+        if not selection:
+            return
+        category_id = int(selection[0])
+        category = next(
+            (item for item in self.db.get_categories() if item["id"] == category_id),
+            None,
+        )
+        if category is None:
+            return
+        self.selected_category_id = category_id
+        self.category_name.delete(0, tk.END)
+        self.category_name.insert(0, category["name"])
+        self.category_color.delete(0, tk.END)
+        self.category_color.insert(0, category["color"])
+        self.save_category_btn.configure(text="Save changes")
+        self.delete_category_btn.configure(state="normal")
+
+    def delete_selected_category(self):
+        if self.selected_category_id is None:
+            return
+        if not messagebox.askyesno("Delete category", "Delete this category?"):
+            return
+        try:
+            self.db.delete_category(self.selected_category_id)
+        except ValueError as error:
+            messagebox.showwarning("Unable to delete category", str(error))
+            return
+        self.clear_category_form()
+        self.refresh_all()
+
+    def clear_category_form(self):
+        self.selected_category_id = None
+        self.category_name.delete(0, tk.END)
+        self.category_color.delete(0, tk.END)
+        self.category_color.insert(0, "#4f46e5")
+        self.save_category_btn.configure(text="Add category")
+        self.delete_category_btn.configure(state="disabled")
 
     def add_selected_task(self):
         task_name = self.task_combo.get().strip()
