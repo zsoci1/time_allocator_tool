@@ -1,6 +1,6 @@
 import sqlite3
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtGui import QColor
@@ -212,9 +212,26 @@ class PlannerWindow(QMainWindow):
     def build_stats_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        self.stats_text = QTextEdit()
-        self.stats_text.setReadOnly(True)
-        layout.addWidget(self.stats_text)
+
+        selector = QHBoxLayout()
+        selector.addWidget(QLabel("Week containing:"))
+        self.stats_week_date = QDateEdit(QDate.currentDate())
+        self.stats_week_date.setCalendarPopup(True)
+        self.stats_week_date.dateChanged.connect(self.refresh_stats)
+        selector.addWidget(self.stats_week_date)
+        selector.addStretch()
+        layout.addLayout(selector)
+
+        self.week_table = QTableWidget(0, 2)
+        self.week_table.setHorizontalHeaderLabels(["Day", "Time spent"])
+        self.week_table.setSelectionMode(
+            QTableWidget.SelectionMode.NoSelection
+        )
+        self.week_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.set_table_column_stretch(
+            self.week_table, stretch_columns=[0], fixed_columns=[1]
+        )
+        layout.addWidget(self.week_table)
         self.tabs.addTab(tab, "Stats")
 
     def current_day(self):
@@ -315,24 +332,19 @@ class PlannerWindow(QMainWindow):
         item.setForeground(QColor("#000000" if luminance > 150 else "#ffffff"))
 
     def refresh_stats(self):
-        day = self.current_day()
-        completed = self.db.get_completed_total_minutes_for_day(day)
-        categories = self.db.get_completed_category_totals(day)
-        lines = [
-            f"Date: {day}",
-            f"Completed: {completed} minutes",
-            f"Free time target: {self.free_time.value()} minutes",
-            f"Uncompleted: {max(self.free_time.value() - completed, 0)} minutes",
-            "",
-            "Category totals:",
-        ]
-        lines.extend(
-            f"- {item['category_name']}: {item['total_minutes']} minutes"
-            for item in categories
-        )
-        if not categories:
-            lines.append("- No completed tasks yet")
-        self.stats_text.setPlainText("\n".join(lines))
+        selected = self.stats_week_date.date().toPyDate()
+        week_start = selected - timedelta(days=selected.weekday())
+        self.week_table.setRowCount(0)
+        for offset in range(7):
+            day = week_start + timedelta(days=offset)
+            row = self.week_table.rowCount()
+            self.week_table.insertRow(row)
+            day_label = day.strftime("%A, %Y-%m-%d")
+            minutes = self.db.get_completed_total_minutes_for_day(
+                day.isoformat()
+            )
+            self.week_table.setItem(row, 0, QTableWidgetItem(day_label))
+            self.week_table.setItem(row, 1, QTableWidgetItem(f"{minutes} min"))
 
     def update_availability(self):
         allocated = self.db.get_total_minutes_for_day(self.current_day())
